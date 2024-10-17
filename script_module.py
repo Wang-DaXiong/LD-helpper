@@ -83,7 +83,7 @@ class Script_action:
                 pic_templated = cv2.imread(template_path)
                 if pic_templated is None:
                     print(f"未能加载图像: {template_path}")
-                    continue
+                    break
                 pic_templated_gray = cv2.cvtColor(pic_templated, cv2.COLOR_BGR2GRAY)
                 futures.append(executor.submit(Script_action.match_pic, pic_background, pic_templated_gray, threshold,
                                                result_queue))
@@ -147,7 +147,7 @@ class Script_action:
                 #logger.warning(f"存在图片匹配失败，已尝试{m_attempt_count}次")
                 print(f"有图片匹配失败，已尝试{m_attempt_count}次，达到{max_match_attempts}次后将结束本轮匹配")
                 time.sleep(2)  # 等待一段时间再重试
-        Script_action.recovery_operation()
+        #Script_action.recovery_operation()
         return match_success
 
     @staticmethod
