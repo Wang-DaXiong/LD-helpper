@@ -88,7 +88,7 @@ def resource_path(relative_path):
 class MyApp(QWidget):
     def __init__(self):
         super().__init__()
-        self.settings = QSettings("MyCompany", "MyApp")
+        self.settings = QSettings("Wang_Da_Xiong", "LD_helpper")
         self.initUI()
 
         #使用 QTimer 定期检查任务状态并更新 UI
@@ -124,7 +124,7 @@ class MyApp(QWidget):
 
         # 设置窗口大小和标题
         self.setGeometry(300, 300, 1500, 600)
-        self.setWindowTitle('LD-Easy-Job')
+        self.setWindowTitle('LD-helpper')
 
         # 设置窗口图标
         # self.setWindowIcon(QIcon('Game+.png'))  # 替换为你的Logo文件路径
@@ -373,29 +373,32 @@ class MyApp(QWidget):
 
     # ===============测试组件=====================
     def load_test_image(self):
+        if self.dnconsole is None:
+            text = "启动模拟器后，可以获取模拟器截图默认路径"
+            self.test_image_path_label.setText(text)
+
+        else:
+            # 获取模拟器截图保存路径
+            screenshot_path = self.dnconsole.images_path
+            Sct_filename = os.path.basename(self.dnconsole.devicess_path)  # 获取模拟器截图图片文件名（固定的地址）
+            self.folder_for_test_image = os.path.join(screenshot_path, Sct_filename)
+
         # 使用 folder_for_test_image 作为初始目录
         file, _ = QFileDialog.getOpenFileName(self, "读取测试大底图", self.folder_for_test_image, "Image Files (*.png *.jpg *.bmp)")
+
         if file:
             file_name = os.path.basename(file)
             self.test_image_path_label.setText(file_name)
+
             self.test_image_full_path = file
             print(f"选择了测试图片: {file_name}")
             # 更新 last_opened_folder
             self.folder_for_test_image = os.path.dirname(file)
 
     def load_template_folder(self):
-        if self.dnconsole is None:
-            text = "启动模拟器后，可以获取模拟器截图默认路径"
-            self.template_folder_label.setText(text)
-            print(text)
-            folder = QFileDialog.getExistingDirectory(self, "读取模板图文件夹", self.folder_for_test_template)
-        else:
-            # 获取模拟器截图保存路径
-            screenshot_path = self.dnconsole.images_path
-            Sct_filename = os.path.basename(self.dnconsole.devicess_path)  # 获取模拟器截图图片文件名（固定的地址）
-            template_folder_path = os.path.join(screenshot_path, Sct_filename)
-            folder = QFileDialog.getExistingDirectory(self, "读取模板图文件夹", template_folder_path)
-
+        # 获取上一级目录
+        parent_folder = os.path.dirname(self.folder_for_test_template)
+        folder = QFileDialog.getExistingDirectory(self, "读取模板图文件夹", parent_folder)
         if folder:
             self.template_folder_label.setText(folder)
             self.template_folder = folder
