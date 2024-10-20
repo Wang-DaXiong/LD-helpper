@@ -11,7 +11,8 @@ from LD_dnconsole import Dnconsole
 from script_module import Script_action
 from Test_match_module import test_match
 
-
+# 脚本执行器
+# 用于检测脚本是否正在运行，并允许外部代码暂停或继续执行。
 class ScriptExecutor(QObject):
     finished = pyqtSignal()
     progress_updated = pyqtSignal(str)
@@ -31,7 +32,6 @@ class ScriptExecutor(QObject):
         self.mutex.lock()
         self.running = value
         self.mutex.unlock()
-
     def get_running(self):
         self.mutex.lock()
         running = self.running
@@ -42,16 +42,15 @@ class ScriptExecutor(QObject):
         self.set_running(True)
         # 获取LD子窗口句柄，用于执行脚本按钮
         self.binding_handle = self.parent().get_binding_handle()
-        # 窗口置顶，否则键盘命令“esc”按键会出错 》》》esc按钮被占用，建议换按钮
-        # win32gui.SetWindowPos(self.binding_handle, win32con.HWND_TOPMOST, 0, 0, 0, 0, win32con.SWP_NOMOVE | win32con.SWP_NOSIZE)
-        # win32gui.SetForegroundWindow(self.binding_handle)
-
+        # 获取Excel文件列表
         excell_path_list = [self.excel_list.item(i).text() for i in range(self.excel_list.count())]
 
         if not excell_path_list:
             self.progress_updated.emit("没有需要处理的Excel文件")
             return
+
         self.progress_updated.emit("执行脚本")
+
         # 检查并初始化 self.dnconsole
         if self.dnconsole is None:
             if self.selected_folder is None:
@@ -63,6 +62,7 @@ class ScriptExecutor(QObject):
             if not self.get_running():
                 break
             try:
+                self.progress_updated.emit(f"正在执行文件: \n{os.path.basename(excell_path)}")
                 Script_action.execute_script_from_excel(self.dnconsole, self.binding_handle, excell_path, self)
             except Exception as e:
                 self.progress_updated.emit(f"执行脚本时发生错误: {str(e)}")
@@ -72,7 +72,7 @@ class ScriptExecutor(QObject):
 
         self.finished.emit()  # 发出完成信号
 
-
+# 打包时获取资源路径
 def resource_path(relative_path):
     #这个方法通过检查 sys._MEIPASS 是否存在来判断程序是否已经打包，并据此构建正确的文件路径。
     """ 获取资源的绝对路径 """
@@ -85,27 +85,28 @@ def resource_path(relative_path):
     return os.path.join(base_path, relative_path)
 
 
-class MyApp(QWidget):
+class LD_helpper(QWidget):
     def __init__(self):
         super().__init__()
         self.settings = QSettings("Wang_Da_Xiong", "LD_helpper")
         self.initUI()
 
-        #使用 QTimer 定期检查任务状态并更新 UI
-        self.timer = QTimer(self)
-        self.timer.timeout.connect(self.update_ui)
-        self.timer.start(1000)  # 每秒更新一次
+        # #使用 QTimer 定期检查任务状态并更新 UI
+        # self.timer = QTimer(self)
+        # self.timer.timeout.connect(self.update_ui)
+        # self.timer.start(1000)  # 每秒更新一次
 
         self.running = True
         self.dnconsole = None  # 初始化dnconsole属性
         self.top_level_handle = None # 存储雷电模拟器主窗口的句柄（顶层句柄）
         self.binding_handle = None # 存储雷电模拟器子窗口的句柄（绑定句柄）
 
+        self.selected_folder = None  # 存储选择的LD文件夹路径
+        self.selected_app = None  # 存储选中的App名称
+        self.load_last_selected_folder()  # 加载上次LD选择的文件夹
+
         self.folder_for_test_image = ""  # 初始化一个属性来存储上次打开的文件夹路径
         self.folder_for_test_template = ""  # 初始化一个属性来存储上次打开的文件夹路径
-
-        self.selected_folder = None  # 存储选择的文件夹路径
-        self.selected_app = None  # 存储选中的App名称
 
         self.test_image_full_path = None # 存储选择的测试大底图
         self.template_folder = None # 存储选择的测试模板图片文件夹
@@ -306,7 +307,18 @@ class MyApp(QWidget):
         if folder:
             self.leidian_path_label.setText(folder)
             self.selected_folder = folder
+            self.save_selected_folder(folder)  # 保存选中的文件夹路径
             self.load_apps_from_folder(folder)
+    def save_selected_folder(self, folder):
+        # 保存选中的文件夹路径到设置中
+        self.settings.setValue("last_selected_LD-folder", folder)
+    def load_last_selected_folder(self):
+        # 从设置中加载上次选中的文件夹路径
+        last_selected_folder = self.settings.value("last_selected_LD-folder", "")
+        if last_selected_folder:
+            self.leidian_path_label.setText(last_selected_folder)
+            self.selected_folder = last_selected_folder
+            self.load_apps_from_folder(last_selected_folder)
 
     def load_apps_from_folder(self, folder_path):
         self.app_combobox.clear()  # 清空当前组合框
@@ -321,7 +333,6 @@ class MyApp(QWidget):
                     # 只显示文件名去掉 .config 扩展名的部分
                     display_name = os.path.splitext(file_name)[0]
                     self.app_combobox.addItem(display_name)
-
     def update_selected_app(self, index):
         self.selected_app = self.app_combobox.itemText(index)
 
@@ -362,14 +373,6 @@ class MyApp(QWidget):
         self.binding_handle = parts[3]
         print(f"绑定句柄: {self.binding_handle}")
         return self.binding_handle
-
-    # def get_binding_handle(self):
-    #     # 获取雷电模拟器子窗口的句柄
-    #     if self.top_level_handle is None:
-    #         self.top_level_handle = win32gui.FindWindow(None, "雷电模拟器")
-    #     if self.top_level_handle:
-    #         self.binding_handle = win32gui.FindWindowEx(self.top_level_handle, None, None, "子窗口标题")
-    #     return self.binding_handle
 
     # ===============测试组件=====================
     def load_test_image(self):
@@ -463,6 +466,7 @@ class MyApp(QWidget):
         # 当窗口关闭时，保存 QListWidget 中的 Excel 文件记录
         self.save_excel_files()
         super().closeEvent(event)
+
     # ==============脚本执行组件=====================
     def update_working_label(self, text):
         self.Working_label.setText(text)
@@ -471,7 +475,7 @@ class MyApp(QWidget):
         # 所有文件执行完毕后更新标签
         self.Working_label.setText("执行完成")
         # 更新 UI 的代码
-        print("UI 已更新")
+        # print("UI 已更新")
 
     def execute_script(self):
         # 创建并启动线程
@@ -501,6 +505,6 @@ class MyApp(QWidget):
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
-    ex = MyApp()
+    ex = LD_helpper()
     ex.show()
     sys.exit(app.exec_())
