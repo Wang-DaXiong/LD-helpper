@@ -1,5 +1,7 @@
 import time
 import os
+from operator import truediv
+
 import numpy as np
 import pandas as pd
 import json
@@ -98,7 +100,6 @@ class Script_action:
             match_XY_list.append(result_queue.get())
 
         return match_XY_list
-
     @staticmethod
     def match_pic(pic_background, pic_templated_gray, threshold, result_queue):
         # 使用模板匹配
@@ -114,10 +115,11 @@ class Script_action:
     def find_and_tap(dnconsole, Sct_full_path, pic_templated_folder):
         all_tapped = True  # 假设所有模板都能找到并点击
         for i in range(len(os.listdir(pic_templated_folder))):
+            # 模拟器截图
             dnconsole.screen_shot()
             image = cv2.imread(Sct_full_path)
             image_gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-
+            # 进行匹配
             targeted_XY = Script_action.find_templates_in_image(image_gray, pic_templated_folder, 0.95)
             #dnconsole.actionOfTap(0, targeted_XY[0], targeted_XY[1])
             if len(targeted_XY) == 0:
@@ -147,17 +149,80 @@ class Script_action:
                 #logger.warning(f"存在图片匹配失败，已尝试{m_attempt_count}次")
                 print(f"有图片匹配失败，已尝试{m_attempt_count}次，达到{max_match_attempts}次后将结束本轮匹配")
                 time.sleep(2)  # 等待一段时间再重试
-        #Script_action.recovery_operation()
+        # Script_action.recovery_operation(dnconsole)
         return match_success
 
     @staticmethod
-    def recovery_operation():
-        print("返回初始界面，等待重新匹配图片")
-        pyautogui.press('esc', presses=2, interval=0.5)  # 按三次ESC键
-        # win32api.PostMessage(hwnd, win32con.WM_KEYDOWN, vkey, 0)  # 发送 WM_KEYDOWN 消息
-        # time.sleep(0.1)  # 确保消息被处理
-        # win32api.PostMessage(hwnd, win32con.WM_KEYUP, vkey, 0)  # 发送 WM_KEYUP 消息
-        time.sleep(2)  # 等待恢复操作生效
+    def detect_image(dnconsole, hwnd, Sct_full_path, pic_templated_folder, interval=5):
+        """
+        监控屏幕上的指定图像，如果找到该图像，则停止；如果没有找到，则每interval秒后重新检测。
+
+        参数:
+            hwnd (int): 窗口句柄。
+            pic_templated_folder (str): 模板图像文件夹路径。
+            interval (int): 每次检查之间的间隔时间（秒）。
+        """
+        while True:
+            # 模拟器截图 -> 获取大底图（灰度）
+            dnconsole.screen_shot()
+            BG_image = cv2.imread(Sct_full_path)
+            background_image_gray = cv2.cvtColor(BG_image, cv2.COLOR_BGR2GRAY)  # 转换为灰度图像
+
+            # 构造每个图片的完整路径 -> 获取模板图（灰度）
+            file_names = os.listdir(pic_templated_folder)
+            pic_templated_list = [os.path.join(pic_templated_folder, file_name) for file_name in file_names]
+
+            # 创建线程池
+            with ThreadPoolExecutor(max_workers=len(pic_templated_list)) as executor:
+                futures = {executor.submit(Script_action.match_image_for_detection, background_image_gray,
+                                           templated_path): templated_path for templated_path in pic_templated_list}
+
+                for future in as_completed(futures):
+                    templated_path = futures[future]
+                    try:
+                        result = future.result()
+                        if result:
+                            print(f"图像 {templated_path} 已找到，结束监控。")
+                            return
+                    except Exception as e:
+                        print(f"处理图像 {templated_path} 时发生错误: {e}")
+
+            # 如果没有找到任何图像，执行返回操作
+            print("未找到监测图像，进行返回操作。")
+            win32api.PostMessage(hwnd, win32con.WM_KEYDOWN, win32con.VK_ESCAPE, 0)  # 发送按下ESC的WM_KEYDOWN消息
+            time.sleep(0.1)  # 短暂等待确保消息被处理
+            win32api.PostMessage(hwnd, win32con.WM_KEYUP, win32con.VK_ESCAPE, 0)  # 发送释放ESC的WM_KEYUP消息
+            time.sleep(interval)
+    @staticmethod
+    def match_image_for_detection(BG_image_gray, templated_path, threshold=0.85):
+        """
+        使用模板匹配检测图像是否存在于背景图像中。
+        参数:
+            BG_image_gray: 背景图像（灰度）(numpy.ndarray)
+            templated_path: 模板图像文件路径 (str)
+            threshold: 匹配度阈值 (float)
+        返回:
+            如果找到匹配的图像，返回True；否则返回False。
+        """
+        try:
+            templated_image = cv2.imread(templated_path)
+            if templated_image is None:
+                print(f"未能加载图像: {templated_path}")
+                return False
+            templated_image_gray = cv2.cvtColor(templated_image, cv2.COLOR_BGR2GRAY)
+
+            match_result = cv2.matchTemplate(BG_image_gray, templated_image_gray, cv2.TM_CCOEFF_NORMED)
+            # 获取所有匹配结果的位置
+            loc = np.where(match_result >= threshold)
+            if len(loc[0]) > 0:
+                return True
+            else:
+                return False
+
+        except Exception as e:
+            print(f"发生错误: {e}")
+            return False
+
 
     @staticmethod
     def execute_script_from_Py(dnconsole, script):
@@ -209,6 +274,8 @@ class Script_action:
                 print(f'等待 {step['时间(秒)']} 秒')
             elif step['step'] == 'find_and_tap_image':
                 Script_action.find_and_tap_plus(dnconsole, Sct_full_path, step['模板文件夹'])
+            elif step['step'] == 'detect_image':
+                Script_action.detect_image(Sct_full_path,)
 
     @staticmethod
     def execute_script_from_excel_test(dnconsole, hwnd_handle, Excell_file_path):
@@ -237,12 +304,15 @@ class Script_action:
             elif action == 'find_and_tap_image':
                 Script_action.find_and_tap_plus(dnconsole, Sct_full_path, param)
                 print('匹图中')
+            elif action == 'detect_image':
+                param = param.replace('\\', '/')
+                Script_action.detect_image(dnconsole, hwnd_handle, Sct_full_path, param)
     @staticmethod
     def execute_script_from_excel(dnconsole, hwnd_handle, Excell_file_path, app_instance):
     #功能：通过读取Excell内容来执行脚本
         # 获取模拟器截图保存路径
         screenshot_path = dnconsole.images_path
-        # 获取模拟器截图图片文件名（固定的地址）
+        # 获取模拟器截图-图片文件名（固定的地址）
         Sct_filename = os.path.basename(dnconsole.devicess_path)
         Sct_full_path = os.path.join(screenshot_path, Sct_filename)
 
@@ -269,6 +339,10 @@ class Script_action:
                 x0, y0, x1, y1 = map(int, param.split(','))
                 dnconsole.actionOfSwipe(x0, y0, x1, y1)
                 # dnconsole.actionOfSwipe(700, 300, 500, 300)  # 左右滑动
+            elif action == 'detect_image':
+                param = param.replace('\\', '/')
+                Script_action.detect_image(dnconsole, hwnd_handle, Sct_full_path, param)
+
 
     @staticmethod
     def char_to_vkey(char):
@@ -317,6 +391,7 @@ class Script_action:
             win32api.PostMessage(hwnd, win32con.WM_KEYUP, vkey, 0)  # 发送 WM_KEYUP 消息
         except ValueError as e:
             print(f"错误: {e}")   # 可以在这里记录日志或者进行其他错误处理
+
 
 
 if __name__ == '__main__':
