@@ -27,6 +27,8 @@ class test_match:
         cv2.waitKey(0)
         cv2.destroyAllWindows()
 
+
+
     @staticmethod
     def test_match_tap(dnconsole, pic_templated_folder):
         # 获取模拟器截图保存路径
@@ -41,7 +43,6 @@ class test_match:
         targeted_XY = Script_action.find_templates_in_image(image_gray, pic_templated_folder, 0.95)
         bool = Script_action.find_and_tap_plus(dnconsole, Sct_full_path, pic_templated_folder)
         return  bool
-
 
     @staticmethod
     def get_binding_handle_for_test(result, index=0):
@@ -76,15 +77,18 @@ if __name__ == '__main__':
     # 获取模拟器截图图片文件名（固定的地址）
     Sct_full_path = r'C:\Users\76703\Documents\leidian9\Pictures\Screenshots\screenshot_tmp.png'
 
+
     # 获取模板图片文件夹（输入固定的地址）
     # 模板图片要有特征、小一点
     pic_templated_folder = r'D:\Programming Study\0908-Fist-try\PIC-From LD\test'
+
 
     # 读取图片的完整路径， 转为opencv的数据内容
     image = cv2.imread(Sct_full_path)
     image_gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)  # 转为灰度图，提高匹配速度
 
     targeted_XY = Script_action.find_templates_in_image(image_gray, pic_templated_folder, 0.95)
+
     bool = Script_action.find_and_tap_plus(dnconsole,Sct_full_path,pic_templated_folder)
     print(bool)
 
