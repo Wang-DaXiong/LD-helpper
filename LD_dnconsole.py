@@ -212,7 +212,7 @@ class Dnconsole:
         cmd = f'-s {index} input tap {x} {y}'
         return self.ldCMD(cmd)
 
-    def actionOfSwipe( self, x0:int, y0:int, x1:int, y1:int, index=0, ms:int = 200 ):
+    def actionOfSwipe( self, x0:int, y0:int, x1:int, y1:int, index=0, ms:int = 500 ):
         '''
         【滑动操作】
         :param index: 模拟器序号
@@ -241,31 +241,12 @@ class Dnconsole:
         except Exception as e:
             return str(e)
 
-    # def action_of_keyboard(self, keyboard_value: str, index=0):
-    #     """
-    #     模拟键盘操作。
-    #     :param keyboard_value: 按键值，可以是 'back', 'home', 'menu', 'volumeup', 'volumedown'
-    #     :param index: 设备索引，默认为0
-    #     :return: 执行命令的结果
-    #     """
-    #     # 构建命令字符串
-    #     # cmd = 'action --index %d --key call.keyboard --value %s' % (index, key)
-    #     cmd = f'action --index {index} --key call.keyboard --value {keyboard_value}'
-    #
-    #     try:
-    #         # 调用CMD方法执行命令
-    #         result = self.CMD(cmd)
-    #     except Exception as e:
-    #         # 处理可能出现的异常
-    #         print(f"An error occurred while executing the command: {e}")
-    #         result = None
-    #
-    #     return result
 
     def acionOfKeyboard_LD(self, Keydcode, index=0):
         #该方法只会发送给 顶层句柄, 子窗口无效
         cmd = f'-s {index} input keyevent {Keydcode}'
         return self.ldCMD(cmd)
+
 
     def actionOfInput(self, index: int, text: str):
         '''
