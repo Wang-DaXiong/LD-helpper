@@ -1,9 +1,10 @@
 import sys
 import os
 
+import subprocess
 import threading
 
-from PyQt5.QtWidgets import QSpacerItem, QFrame, QSizePolicy, QApplication, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QSplitter, QListWidget, QFileDialog, QLabel, QComboBox, QListWidgetItem
+from PyQt5.QtWidgets import QRadioButton, QSpacerItem, QFrame, QSizePolicy, QApplication, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QSplitter, QListWidget, QFileDialog, QLabel, QComboBox, QListWidgetItem, QMessageBox
 from PyQt5.QtGui import QIcon
 from PyQt5.QtCore import QSettings, QMutex, QObject, pyqtSignal, QTimer
 
@@ -27,6 +28,7 @@ class ScriptExecutor(QObject):
         self.excel_list = None
         self.Working_label = None
         self.binding_handle = None
+        self.execution_mode = 'start_from_beginning'  # 默认从头开始执行
 
     def set_running(self, value):
         self.mutex.lock()
@@ -38,10 +40,12 @@ class ScriptExecutor(QObject):
         self.mutex.unlock()
         return running
 
+
     def execute_script_task(self):
         self.set_running(True)
         # 获取LD子窗口句柄，用于执行脚本按钮
         self.binding_handle = self.parent().get_binding_handle()
+
         # 获取Excel文件列表
         excell_path_list = [self.excel_list.item(i).text() for i in range(self.excel_list.count())]
 
@@ -58,19 +62,21 @@ class ScriptExecutor(QObject):
                 return
             self.parent().start_program_and_app()
 
-        for excell_path in excell_path_list:
+        start_index = 0 if self.execution_mode == 'start_from_beginning' else self.excel_list.currentRow()
+        for idx in range(start_index, len(excell_path_list)):
             if not self.get_running():
                 break
+            excell_path = excell_path_list[idx]
             try:
                 self.progress_updated.emit(f"正在执行文件: \n{os.path.basename(excell_path)}")
                 Script_action.execute_script_from_excel(self.dnconsole, self.binding_handle, excell_path, self)
             except Exception as e:
                 self.progress_updated.emit(f"执行脚本时发生错误: {str(e)}")
                 print(f"Error executing script from {excell_path}: {e}")
-                # 可以选择在这里停止执行，或者继续尝试下一个文件
                 continue
 
         self.finished.emit()  # 发出完成信号
+
 
 # 打包时获取资源路径
 def resource_path(relative_path):
@@ -84,12 +90,16 @@ def resource_path(relative_path):
 
     return os.path.join(base_path, relative_path)
 
-
 class LD_helpper(QWidget):
     def __init__(self):
         super().__init__()
         self.settings = QSettings("Wang_Da_Xiong", "LD_helpper")
+
+        self.current_script_flow = 1  # 默认显示脚本流 1
         self.initUI()
+        # 在初始化完成后恢复当前脚本流的内容
+        self.restore_excel_files()
+        self.load_script_flow(self.current_script_flow)
 
         # #使用 QTimer 定期检查任务状态并更新 UI
         # self.timer = QTimer(self)
@@ -108,6 +118,7 @@ class LD_helpper(QWidget):
         self.folder_for_test_image = ""  # 初始化一个属性来存储上次打开的文件夹路径
         self.folder_for_test_template = ""  # 初始化一个属性来存储上次打开的文件夹路径
 
+
         self.test_image_full_path = None # 存储选择的测试大底图
         self.template_folder = None # 存储选择的测试模板图片文件夹
 
@@ -117,6 +128,13 @@ class LD_helpper(QWidget):
         self.script_executor.progress_updated.connect(self.update_working_label)
         self.script_executor.finished.connect(self.on_script_finished) # 连接信号到槽
 
+        # 设置默认执行方式为“起始执行”
+        self.script_executor.execution_mode = 'start_from_beginning'
+        self.set_start_from_beginning()  # 初始化按钮状态
+
+        # 应用自定义样式表 --- 用来更改圆点的颜色
+        self.apply_custom_style()
+
     def initUI(self):
         # 制作逻辑：
         # 窗口 -> 布局 -> 子窗口/子布局 -> 子布局
@@ -124,7 +142,7 @@ class LD_helpper(QWidget):
         # 实现按钮功能
 
         # 设置窗口大小和标题
-        self.setGeometry(300, 300, 1500, 600)
+        self.setGeometry(300, 300, 1800, 600)
         self.setWindowTitle('LD-helpper')
 
         # 设置窗口图标
@@ -134,7 +152,7 @@ class LD_helpper(QWidget):
         # 设置窗口图标
         self.setWindowIcon(QIcon(icon_path))
 
-        # 创建主布局
+        # 创建主垂直布局
         main_layout = QVBoxLayout()
 
         # 第一行布局 - 程序启动内容
@@ -164,6 +182,11 @@ class LD_helpper(QWidget):
         first_row_layout.addLayout(leidian_layout) #将局部布局 添加到 第一行布局中
         first_row_layout.addLayout(app_layout)  #将局部布局 添加到 第一行布局中
         first_row_layout.addWidget(self.start_program_button)  # 将启动按钮（窗口） 添加到 第一行布局中
+
+        # 固定第一行布局的高度
+        first_row_widget = QWidget()
+        first_row_widget.setLayout(first_row_layout)
+        first_row_widget.setFixedHeight(120)  # 根据需要调整高度
 
         # ========================================
 
@@ -199,45 +222,67 @@ class LD_helpper(QWidget):
 
         test_widget.setLayout(test_layout) #将 测试组件的布局 添加到 测试组件窗口
 
-        # 第二行第二列布局 - 脚本组件1
-        script_widget = QWidget()
-        script_layout = QVBoxLayout()
-
-        self.excel_list = QListWidget() #制作显示列表
-        self.load_excel_button = QPushButton('载入Excell文件', self)
-        self.delete_excel_button = QPushButton('删除Excell文件', self)
-        self.move_up_button = QPushButton('上移', self)
-        self.move_down_button = QPushButton('下移', self)
-        script_layout.addWidget(self.excel_list) #添加显示列表到第二列布局
-        script_layout.addWidget(self.load_excel_button)
-        script_layout.addWidget(self.delete_excel_button)
-        script_layout.addWidget(self.move_up_button)
-        script_layout.addWidget(self.move_down_button)
-
-        script_widget.setLayout(script_layout) #将 脚本组件1的布局 添加到 脚本组件1窗口
-
-
         # 创建一个垂直分割线
         v_line = QFrame()
         v_line.setFrameShape(QFrame.VLine)
         # v_line.setFrameShadow(QFrame.Sunken)  # 可选，设置阴影效果
         v_line.setLineWidth(1)  # 设置线条宽度
         # v_line.setMidLineWidth(30)  # 设置线条中间部分的宽度
-        #v_line.setStyleSheet("margin-top: 50px; margin-bottom: 50px;")  # 设置左右边距
+        # v_line.setStyleSheet("margin-top: 50px; margin-bottom: 50px;")  # 设置左右边距
 
+        # 第二行第二列布局 - 脚本组件1
+        script_widget = QWidget()
+        script_layout = QVBoxLayout()
+
+        # 新增脚本流切换按钮
+        flow_buttons_layout = QHBoxLayout()
+        self.flow_buttons = []
+        for i in range(1, 5):
+            button = QPushButton(f'脚本流_{i}', self)
+            button.clicked.connect(lambda checked, index=i: self.load_script_flow(index))
+            flow_buttons_layout.addWidget(button)
+            self.flow_buttons.append(button)
+        script_layout.addLayout(flow_buttons_layout)
+
+        # 制作 excl操作显示列表
+        self.excel_list = QListWidget()
+        script_layout.addWidget(self.excel_list)  # 添加excl操作显示列表到第二列布局
+
+        self.load_excel_button = QPushButton('载入Excel文件', self)
+        self.delete_excel_button = QPushButton('删除Excel文件', self)
+        self.move_up_button = QPushButton('上移', self)
+        self.move_down_button = QPushButton('下移', self)
+
+        script_layout.addWidget(self.load_excel_button)
+        script_layout.addWidget(self.delete_excel_button)
+        # 将上移和下移按钮放置在同一行
+        move_buttons_layout = QHBoxLayout()
+        move_buttons_layout.addWidget(self.move_up_button)
+        move_buttons_layout.addWidget(self.move_down_button)
+        script_layout.addLayout(move_buttons_layout)
+
+        script_widget.setLayout(script_layout) #将 脚本组件1的布局 添加到 脚本组件1窗口
 
         # 第二行第三列布局 - 脚本组件2
         work_widget = QWidget()
         work_layout = QVBoxLayout()
+        execution_mode_layout = QHBoxLayout()
+        self.start_from_beginning_radio = QRadioButton('从Excel列表起始执行', self)
+        self.start_from_current_radio = QRadioButton('从Excel当前选择执行', self)
+
+        execution_mode_layout.addWidget(self.start_from_beginning_radio)
+        execution_mode_layout.addWidget(self.start_from_current_radio)
+
         self.Working_label = QLabel('未运行', self) # 制作 程序运行 显示表
         self.execute_script_button = QPushButton('执行脚本', self)
         self.stop_script_button = QPushButton('停止脚本', self)
-        self.restart_script_button = QPushButton('重启脚本', self)
+        self.open_excel_script_button = QPushButton('打开Excel文件', self)
 
-        work_layout.addWidget(self.Working_label)  # 添加显示列表到第二列布局
+        work_layout.addWidget(self.Working_label)  # 添加 显示列表 到第二行第三列布局
+        work_layout.addLayout(execution_mode_layout) # 添加 执行方式 到第二行第三列布局
         work_layout.addWidget(self.execute_script_button)
         work_layout.addWidget(self.stop_script_button)
-        work_layout.addWidget(self.restart_script_button)
+        work_layout.addWidget(self.open_excel_script_button)
 
         work_widget.setLayout(work_layout) #将 脚本组件2的布局 添加到 脚本组件2窗口
 
@@ -247,7 +292,7 @@ class LD_helpper(QWidget):
         splitter.addWidget(script_widget)
         splitter.addWidget(work_widget )
 
-        splitter.setSizes([400, 10, 600, 400])  # 设置初始宽度比例
+        splitter.setSizes([400, 10, 1200, 400])  # 设置初始宽度比例
         second_row_layout.addWidget(splitter)
 
         # ========================================
@@ -270,7 +315,7 @@ class LD_helpper(QWidget):
         # ========================================
 
         # 添加到主布局
-        main_layout.addLayout(first_row_layout)
+        main_layout.addWidget(first_row_widget)
         main_layout.addWidget(h_line)   # 分割线
         main_layout.addLayout(second_row_layout)
         main_layout.addWidget(h2_line)  # 分割线
@@ -278,8 +323,6 @@ class LD_helpper(QWidget):
 
         self.setLayout(main_layout) #显示整体布局
 
-        # 恢复上次保存的 Excel 文件记录
-        self.restore_excel_files()
 
         # ========================================
         # ========================================
@@ -297,9 +340,36 @@ class LD_helpper(QWidget):
         self.move_up_button.clicked.connect(self.move_excel_up)
         self.move_down_button.clicked.connect(self.move_excel_down)
 
+        self.start_from_beginning_radio.clicked.connect(self.set_start_from_beginning)
+        self.start_from_current_radio.clicked.connect(self.set_start_from_current)
         self.execute_script_button.clicked.connect(self.execute_script)
         self.stop_script_button.clicked.connect(self.stop_script)
-        self.restart_script_button.clicked.connect(self.restart_script)
+        self.open_excel_script_button.clicked.connect(self.open_excel_script_file)
+
+        # 默认选中“从头开始执行”选项
+        self.start_from_beginning_radio.setChecked(True)
+
+    def apply_custom_style(self):
+        """应用自定义样式表"""
+        style_sheet = """
+        QRadioButton {
+            spacing: 5px;
+        }
+        QRadioButton::indicator {
+            width: 16px;
+            height: 16px;
+            border-radius: 12px; /* 圆形 */
+        }
+        QRadioButton::indicator::unchecked {
+            border: 5px solid #D3D3D3; /* 浅灰色边框 */
+            background-color: #FFFFFF; /* 背景白色 */
+        }
+        QRadioButton::indicator::checked {
+            border: 5px solid #555555; /* 樱桃红色边框 #d4237a */
+            background-color: #FFFFFF; /* 背景白色 */
+        }
+        """
+        self.setStyleSheet(style_sheet)
 
 # =================启动组件=======================================
     def select_leidian_folder(self):
@@ -322,14 +392,15 @@ class LD_helpper(QWidget):
 
     def load_apps_from_folder(self, folder_path):
         self.app_combobox.clear()  # 清空当前组合框
-        apps_folder_path = os.path.join(folder_path, 'apps')
+        apps_folder_path = os.path.join(folder_path, 'vms\\customizeConfigs')
 
         # 添加“仅打开模拟器”的选项
         self.app_combobox.addItem("仅打开模拟器")
 
         if os.path.exists(apps_folder_path):
             for file_name in os.listdir(apps_folder_path):
-                if file_name.endswith('.config'):
+                if file_name.endswith('.smp'):
+                    #只显示文件名去掉 .smp 扩展名的部分
                     # 只显示文件名去掉 .config 扩展名的部分
                     display_name = os.path.splitext(file_name)[0]
                     self.app_combobox.addItem(display_name)
@@ -377,26 +448,25 @@ class LD_helpper(QWidget):
     # ===============测试组件=====================
     def load_test_image(self):
         if self.dnconsole is None:
-            text = "启动模拟器后，可以获取模拟器截图默认路径"
-            self.test_image_path_label.setText(text)
-
+            # 如果 dnconsole 没有初始化，弹出警告对话框
+            QMessageBox.warning(self, "温馨提醒", "请先启动模拟器，可以自动获取，模拟器默认的截图路径")
         else:
             # 获取模拟器截图保存路径
             screenshot_path = self.dnconsole.images_path
             Sct_filename = os.path.basename(self.dnconsole.devicess_path)  # 获取模拟器截图图片文件名（固定的地址）
             self.folder_for_test_image = os.path.join(screenshot_path, Sct_filename)
 
-        # 使用 folder_for_test_image 作为初始目录
-        file, _ = QFileDialog.getOpenFileName(self, "读取测试大底图", self.folder_for_test_image, "Image Files (*.png *.jpg *.bmp)")
+            # 使用 folder_for_test_image 作为初始目录
+            file, _ = QFileDialog.getOpenFileName(self, "读取测试大底图", self.folder_for_test_image, "Image Files (*.png *.jpg *.bmp)")
 
-        if file:
-            file_name = os.path.basename(file)
-            self.test_image_path_label.setText(file_name)
+            if file:
+                file_name = os.path.basename(file)
+                self.test_image_path_label.setText(file_name)
 
-            self.test_image_full_path = file
-            print(f"选择了测试图片: {file_name}")
-            # 更新 last_opened_folder
-            self.folder_for_test_image = os.path.dirname(file)
+                self.test_image_full_path = file
+                print(f"选择了测试图片: {file_name}")
+                # 更新 last_opened_folder
+                self.folder_for_test_image = os.path.dirname(file)
 
     def load_template_folder(self):
         # 获取上一级目录
@@ -410,33 +480,83 @@ class LD_helpper(QWidget):
             self.folder_for_test_template = folder
 
     def match_image(self):
-        test_match.test_match_pic(self.test_image_full_path, self.template_folder)
+        if self.dnconsole is None:
+            # 如果 dnconsole 没有初始化，弹出警告对话框
+            QMessageBox.warning(self, "温馨提醒", "请先启动模拟器")
+        else:
+            if self.test_image_full_path and self.template_folder:
+                # 执行图片匹配逻辑
+                test_match.test_match_pic(self.test_image_full_path, self.template_folder)
+            else:
+                # 如果没有选择测试图片或模板文件夹，弹出警告对话框
+                QMessageBox.warning(self, "警告", "请选择测试图片和模板文件夹")
 
     # ==============脚本Excell组件=====================
     def restore_excel_files(self):
-        # 从 QSettings 中恢复 Excel 文件记录
-        excel_files = self.settings.value("excel_files", [])
-        for file in excel_files:
-            item = QListWidgetItem(file)
-            self.excel_list.addItem(item)
+        # 从 QSettings 中恢复所有脚本流的 Excel 文件记录
+        for i in range(1, 5):
+            files = self.settings.value(f'script_flow_{i}', [])
+            if i == self.current_script_flow:
+                for file in files:
+                    item = QListWidgetItem(file)
+                    self.excel_list.addItem(item)
+
+    def load_script_flow(self, index):
+        """加载指定索引的脚本流"""
+        self.current_script_flow = index
+        files = self.settings.value(f'script_flow_{index}', [])
+        self.excel_list.clear()
+        for file in files:
+            self.excel_list.addItem(QListWidgetItem(file))
+
+        # 更新按钮样式
+        for i, button in enumerate(self.flow_buttons):
+            if i + 1 == index:
+                button.setStyleSheet("")  # 恢复默认样式
+            else:
+                button.setStyleSheet("QPushButton { color: gray; }")  # 设置灰色样式
+
+    def save_script_flow(self, index):
+        """保存当前的脚本流到指定索引"""
+        files = [self.excel_list.item(i).text() for i in range(self.excel_list.count())]
+        self.settings.setValue(f'script_flow_{index}', files)
+
+    # def load_excel_file(self):
+    #     file, _ = QFileDialog.getOpenFileName(self, "载入Excell文件", "", "Excel Files (*.xlsx *.xls)")
+    #     if file:
+    #         self.excel_list.addItem(QListWidgetItem(file))
+    #         self.save_script_flow(self.current_script_flow)
 
     def load_excel_file(self):
-        # 这里应该是打开一个文件对话框让用户选择 Excel 文件
-        # 并将选中的文件路径添加到 QListWidget
-        # 示例代码中省略了实际的文件对话框
-        file, _ = QFileDialog.getOpenFileName(self, "载入Excell文件", "", "Excel Files (*.xlsx *.xls)")
-        item = QListWidgetItem(file)
-        self.excel_list.addItem(item)
-        self.save_excel_files()
+        file, _ = QFileDialog.getOpenFileName(self, "载入Excel文件", "", "Excel Files (*.xlsx *.xls)")
+        if file:
+            # 获取当前选中的行索引
+            selected_items = self.excel_list.selectedItems()
+
+            if selected_items:
+                # 有选中项，插入到选中项的下一行
+                selected_row = self.excel_list.row(selected_items[0])  # 获取第一个选中项的行号
+                insert_row = selected_row + 1
+            else:
+                # 没有选中项，添加到末尾
+                insert_row = self.excel_list.count()
+
+            # 创建新的 QListWidgetItem
+            item = QListWidgetItem(file)
+            self.excel_list.insertItem(insert_row, item)
+
+            # 自动选中新插入的项
+            self.excel_list.setCurrentItem(item)
+
+            # 可选：保存脚本流程
+            self.save_script_flow(self.current_script_flow)
 
     def delete_selected_excel(self):
-        # 删除选中的 Excel 文件项
         for item in self.excel_list.selectedItems():
             self.excel_list.takeItem(self.excel_list.row(item))
-        self.save_excel_files()
+        self.save_script_flow(self.current_script_flow)
 
     def move_excel_up(self):
-        # 将选中的 Excel 文件项向上移动
         selected_items = self.excel_list.selectedItems()
         for item in selected_items:
             row = self.excel_list.row(item)
@@ -444,10 +564,9 @@ class LD_helpper(QWidget):
                 self.excel_list.takeItem(row)
                 self.excel_list.insertItem(row - 1, item)
                 self.excel_list.setCurrentItem(item)
-        self.save_excel_files()
+        self.save_script_flow(self.current_script_flow)
 
     def move_excel_down(self):
-        # 将选中的 Excel 文件项向下移动
         selected_items = self.excel_list.selectedItems()
         for item in reversed(selected_items):
             row = self.excel_list.row(item)
@@ -455,16 +574,10 @@ class LD_helpper(QWidget):
                 self.excel_list.takeItem(row)
                 self.excel_list.insertItem(row + 1, item)
                 self.excel_list.setCurrentItem(item)
-        self.save_excel_files()
-
-    def save_excel_files(self):
-        # 保存当前 QListWidget 中的 Excel 文件记录到 QSettings
-        excel_files = [self.excel_list.item(i).text() for i in range(self.excel_list.count())]
-        self.settings.setValue("excel_files", excel_files)
+        self.save_script_flow(self.current_script_flow)
 
     def closeEvent(self, event):
-        # 当窗口关闭时，保存 QListWidget 中的 Excel 文件记录
-        self.save_excel_files()
+        self.save_script_flow(self.current_script_flow)
         super().closeEvent(event)
 
     # ==============脚本执行组件=====================
@@ -477,7 +590,29 @@ class LD_helpper(QWidget):
         # 更新 UI 的代码
         # print("UI 已更新")
 
+    def set_start_from_beginning(self):
+        """设置执行方式为‘从头开始执行’"""
+        if not self.start_from_beginning_radio.isChecked():
+            self.start_from_beginning_radio.setChecked(True)
+        self.script_executor.execution_mode = 'start_from_beginning'
+
+    def set_start_from_current(self):
+        """设置执行方式为‘从当前选择的Excel开始执行’"""
+        if not self.start_from_current_radio.isChecked():
+            self.start_from_current_radio.setChecked(True)
+        self.script_executor.execution_mode = 'start_from_current'
+
     def execute_script(self):
+        # 清空之前的执行状态
+        self.script_executor.set_running(True)
+        self.script_executor.execution_mode = self.script_executor.execution_mode
+
+        # 更新当前选择的Excel文件
+        current_row = self.excel_list.currentRow()
+        if current_row < 0:  # 如果没有选中的项，则默认从第一个开始
+            current_row = 0
+        self.excel_list.setCurrentRow(current_row)
+
         # 创建并启动线程
         self.script_executor.dnconsole = self.dnconsole
         self.script_executor.selected_folder = self.selected_folder
@@ -491,11 +626,20 @@ class LD_helpper(QWidget):
         self.script_executor.set_running(False)
         self.update_working_label("停止脚本")
 
-    def restart_script(self):
-        self.stop_script()
-        self.script_executor.set_running(True)
-        self.execute_script()
-        self.update_working_label("重启脚本")
+    def open_excel_script_file(self):
+        """打开选中的Excel文件"""
+        selected_items = self.excel_list.selectedItems()
+        if selected_items:
+            selected_file = selected_items[0].text()
+            try:
+                # 使用默认程序打开Excel文件
+                # subprocess.Popen([selected_file], shell=True)
+                # 使用默认程序打开Excel文件
+                os.startfile(selected_file)
+            except Exception as e:
+                QMessageBox.critical(self, "错误", f"无法打开文件: {e}")
+        else:
+            QMessageBox.warning(self, "提示", "亲，请先选择一个Excel文件哦！")
 
     def update_ui(self):
         # 定期检查任务状态并更新 UI
